@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IDR Ballistic Simulator v2.0</title>
+    <style>
+        :root {
+            --bg: #0f0f0f;
+            --panel: #1a1a1a;
+            --accent: #007acc;
+            --text: #d4d4d4;
+            --highlight: #569cd6;
+            --warning: #ce9178;
+        }
+        body { 
+            font-family: 'Segoe UI', 'Roboto', monospace; 
+            background-color: var(--bg); 
+            color: var(--text); 
+            display: flex;
+            justify-content: center;
+            padding: 40px 20px;
+        }
+        .container {
+            background: var(--panel);
+            padding: 25px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            width: 100%;
+            max-width: 400px;
+        }
+        h3 { 
+            color: var(--highlight); 
+            margin: 0 0 20px 0; 
+            font-size: 18px; 
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+        }
+        .input-group { 
+            margin-bottom: 12px; 
+            display: flex; 
+            justify-content: space-between;
+            align-items: center; 
+        }
+        label { font-size: 13px; font-weight: 600; color: #aaa; }
+        input {
+            background: #252526; 
+            border: 1px solid #444;
+            color: #fff; 
+            padding: 6px 10px; 
+            width: 90px; 
+            border-radius: 4px; 
+            font-family: monospace;
+            outline: none;
+        }
+        input:focus { border-color: var(--accent); }
+        
+        button {
+            width: 100%;
+            padding: 12px; 
+            background: var(--accent); 
+            color: white;
+            border: none; 
+            cursor: pointer; 
+            margin-top: 15px;
+            font-family: inherit;
+            font-size: 14px; 
+            font-weight: bold; 
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        button:hover { background: #005f9e; }
+
+        #results { 
+            display: none; 
+            margin-top: 25px; 
+            padding-top: 15px; 
+            border-top: 1px dashed #444; 
+        }
+        .result-row { 
+            display: flex; 
+            justify-content: space-between; 
+            margin-bottom: 8px; 
+            font-size: 14px;
+        }
+        .result-label { color: #888; }
+        .result-val { color: #fff; font-weight: bold; font-family: monospace; }
+        
+        .stop-note { 
+            margin-top: 15px; 
+            font-size: 12px; 
+            color: var(--warning); 
+            background: rgba(206, 145, 120, 0.1);
+            padding: 8px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .disclaimer { 
+            margin-top: 20px; 
+            font-size: 10px; 
+            color: #555; 
+            text-align: center;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h3>Terminal Ballistics Simulator</h3>
+
+    <div class="input-group"><label>Velocity (fps)</label><input type="number" id="velocity" value="2162"></div>
+    <div class="input-group"><label>Weight (grains)</label><input type="number" id="grains" value="180"></div>
+    <div class="input-group"><label>Caliber (inch)</label><input type="number" id="caliber" step="0.001" value="0.308"></div>
+
+    <button onclick="runSimulation()">RUN SIMULATION</button>
+
+    <div id="results">
+        <div class="result-row"><span class="result-label">Calculated SD</span><span class="result-val" id="r-sd">—</span></div>
+        <div class="result-row"><span class="result-label">Impact IDR</span><span class="result-val" id="r-idr">—</span></div>
+        <div class="result-row"><span class="result-label">Penetration</span><span class="result-val" id="r-depth">—</span></div>
+        <div class="result-row"><span class="result-label">Max Expansion</span><span class="result-val" id="r-exp-cal">—</span></div>
+        <div class="result-row"><span class="result-label">Impact Energy</span><span class="result-val" id="r-energy">—</span></div>
+        <div class="result-row"><span class="result-label">Wound Volume</span><span class="result-val" id="r-wound">—</span></div>
+        <div id="r-stop-container"></div>
+    </div>
+
+    <div class="disclaimer">
+        <b>IDR (Impact Density Rate)</b> models dynamic momentum through high-resolution expansion slices.
+    </div>
+</div>
+
+<script>
+    function calculateEnergy(v, grains) {
+        return (Math.pow(v, 2) * grains) / 450240;
+    }
+
+    function runSimulation() {
+        // Input Fetching
+        const v_start = parseFloat(document.getElementById('velocity').value);
+        const grains  = parseFloat(document.getElementById('grains').value);
+        const caliber = parseFloat(document.getElementById('caliber').value);
+
+        // Constants & Config
+        const GEL_RESISTANCE = 0.000550;
+        const MAX_CALIBER    = caliber * 1.75;
+        const STEP           = 0.1; // High resolution: 10 steps per inch
+        let expansionConst   = 0.0; 
+        
+        let impactEnergy = calculateEnergy(v_start, grains);
+        expansionConst = (impactEnergy < 200) ? 0.001 : 0.25; 
+
+        // Initial Calculations
+        const initialSD = grains / (7000 * Math.pow(caliber, 2));
+        const initialIDR = (v_start * (grains / 7000) * initialSD) * caliber;
+
+        // Terminal Floor Logic
+        let velFloor, nrgFloor, stopMsg;
+        if (initialIDR <= 0.50) {
+            velFloor = 0; nrgFloor = 30;
+            stopMsg = "IDR threshold (small caliber floor)";
+        } else if (v_start < 1200 && initialIDR >= 2.0) {
+            velFloor = 5; nrgFloor = 5;
+            stopMsg = "Terminal condition met (heavy/subsonic)";
+        } else if (v_start <= 1400) {
+            velFloor = 1; nrgFloor = 1;
+            stopMsg = "Terminal condition met (handgun)";
+        } else {
+            velFloor = 25; nrgFloor = 30;
+            stopMsg = "Terminal condition met (rifle)";
+        }
+
+        // Loop Variables
+        let v = v_start;
+        let dist = 0;
+        let totalWoundVolume = 0;
+        let stopReason = "";
+        let finalExpandedCal = caliber;
+
+        // Simulation Loop
+        while (dist < 100) {
+            const expansionProgress = 1 - Math.exp(-expansionConst * dist);
+            const expandedCal = caliber + (MAX_CALIBER - caliber) * expansionProgress;
+            finalExpandedCal = expandedCal; 
+            
+            const currentSD = grains / (7000 * Math.pow(expandedCal, 2));
+            const currentIDR = (v * (grains / 7000) * currentSD) * expandedCal;
+            const energy = calculateEnergy(v, grains);
+
+            // Break if energy falls below floor
+            if (v <= velFloor || energy <= nrgFloor) {
+                stopReason = stopMsg;
+                break;
+            }
+
+            const area = Math.PI * Math.pow(expandedCal / 2, 2);
+            
+            // Wound Volume must account for slice thickness (STEP)
+            totalWoundVolume += (area * STEP);
+
+            // Calculate velocity loss and apply relative to STEP
+            const vLossPerInch = (GEL_RESISTANCE * Math.pow(v, 2) * area) / currentIDR;
+            v = Math.max(0, v - (vLossPerInch * STEP));
+            
+            dist += STEP;
+        }
+
+        // UI Update Section
+        document.getElementById('r-sd').textContent = initialSD.toFixed(4);
+        document.getElementById('r-idr').textContent = initialIDR.toFixed(4);
+        document.getElementById('r-depth').textContent = dist.toFixed(1) + " inches";
+        document.getElementById('r-exp-cal').textContent = finalExpandedCal.toFixed(3) + " in";
+        document.getElementById('r-energy').textContent = Math.round(impactEnergy) + " ft-lbs";
+        document.getElementById('r-wound').textContent = totalWoundVolume.toFixed(4) + " in³";
+        
+        const stopContainer = document.getElementById('r-stop-container');
+        if (stopReason) {
+            stopContainer.innerHTML = `<div class="stop-note">${stopReason}</div>`;
+        } else {
+            stopContainer.innerHTML = "";
+        }
+        
+        document.getElementById('results').style.display = 'block';
+    }
+</script>
+
+</body>
+</html>
