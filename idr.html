@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IDR Ballistic Simulator v2.0</title>
+    <title>IDR Ballistic Simulator v2.1</title>
     <style>
         :root {
             --bg: #0f0f0f;
@@ -105,6 +105,31 @@
             text-align: center;
             line-height: 1.4;
         }
+
+        /* --- New PDF Link Styling --- */
+        .pdf-link-container {
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 1px solid #333;
+            text-align: center;
+        }
+        .pdf-btn {
+            display: inline-block;
+            color: var(--highlight);
+            text-decoration: none;
+            font-size: 11px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            padding: 8px 15px;
+            border: 1px solid var(--highlight);
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+        .pdf-btn:hover {
+            background: rgba(86, 156, 214, 0.1);
+            color: #fff;
+            border-color: #fff;
+        }
     </style>
 </head>
 <body>
@@ -131,6 +156,13 @@
     <div class="disclaimer">
         <b>IDR (Impact Density Rate)</b> models dynamic momentum through high-resolution expansion slices.
     </div>
+
+    <!-- PDF Link Section -->
+    <div class="pdf-link-container">
+        <a href="IDR_Ballistics_Technical_Paper.pdf" target="_blank" class="pdf-btn">
+            VIEW TECHNICAL PAPER (PDF)
+        </a>
+    </div>
 </div>
 
 <script>
@@ -139,25 +171,21 @@
     }
 
     function runSimulation() {
-        // Input Fetching
         const v_start = parseFloat(document.getElementById('velocity').value);
         const grains  = parseFloat(document.getElementById('grains').value);
         const caliber = parseFloat(document.getElementById('caliber').value);
 
-        // Constants & Config
         const GEL_RESISTANCE = 0.000550;
         const MAX_CALIBER    = caliber * 1.75;
-        const STEP           = 0.1; // High resolution: 10 steps per inch
+        const STEP           = 0.1; 
         let expansionConst   = 0.0; 
         
         let impactEnergy = calculateEnergy(v_start, grains);
         expansionConst = (impactEnergy < 200) ? 0.001 : 0.25; 
 
-        // Initial Calculations
         const initialSD = grains / (7000 * Math.pow(caliber, 2));
         const initialIDR = (v_start * (grains / 7000) * initialSD) * caliber;
 
-        // Terminal Floor Logic
         let velFloor, nrgFloor, stopMsg;
         if (initialIDR <= 0.50) {
             velFloor = 0; nrgFloor = 30;
@@ -173,14 +201,12 @@
             stopMsg = "Terminal condition met (rifle)";
         }
 
-        // Loop Variables
         let v = v_start;
         let dist = 0;
         let totalWoundVolume = 0;
         let stopReason = "";
         let finalExpandedCal = caliber;
 
-        // Simulation Loop
         while (dist < 100) {
             const expansionProgress = 1 - Math.exp(-expansionConst * dist);
             const expandedCal = caliber + (MAX_CALIBER - caliber) * expansionProgress;
@@ -190,25 +216,18 @@
             const currentIDR = (v * (grains / 7000) * currentSD) * expandedCal;
             const energy = calculateEnergy(v, grains);
 
-            // Break if energy falls below floor
             if (v <= velFloor || energy <= nrgFloor) {
                 stopReason = stopMsg;
                 break;
             }
 
             const area = Math.PI * Math.pow(expandedCal / 2, 2);
-            
-            // Wound Volume must account for slice thickness (STEP)
             totalWoundVolume += (area * STEP);
-
-            // Calculate velocity loss and apply relative to STEP
             const vLossPerInch = (GEL_RESISTANCE * Math.pow(v, 2) * area) / currentIDR;
             v = Math.max(0, v - (vLossPerInch * STEP));
-            
             dist += STEP;
         }
 
-        // UI Update Section
         document.getElementById('r-sd').textContent = initialSD.toFixed(4);
         document.getElementById('r-idr').textContent = initialIDR.toFixed(4);
         document.getElementById('r-depth').textContent = dist.toFixed(1) + " inches";
